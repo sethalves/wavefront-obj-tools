@@ -23,11 +23,12 @@ exec csi -include-path /usr/local/share/scheme -s $0 "$@"
     (display why)
     (newline)
     (display (car (command-line)))
-    (display " [args] input-file.obj input-file.obj\n")
+    (display " [args] input-file.obj ...\n")
     (display "  -s scale-factor           scale points by factor\n")
     (display "  -d max-dimension          scale model to max-dimension\n")
     (display "  -c                        reuse coincident points\n")
-    (display "  -n                        flip faces so normals are outward\n")
+    (display
+     "  -n                        flip faces so outsides face as normals\n")
     (display "  -o output-filename        instead of stdout\n")
     (exit 1))
 

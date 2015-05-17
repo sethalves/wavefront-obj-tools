@@ -18,16 +18,19 @@
         (display "  -s scale-factor           scale points by factor\n")
         (display "  -d max-dimension          scale model to max-dimension\n")
         (display "  -c                        reuse coincident points\n")
-        (display
-         "  -n                        flip faces so outsides face as normals\n")
+        (display "  -n                        flip faces so outsides face as normals\n")
         (display "  -p                        print information about model\n")
         (display "  -m scale                  set some texture coordinates\n")
         (display "  -t x y z                  translate model by an offset\n")
+        (display "  -L material-lib-filename  include the named material library\n")
+        (display "  -S material-name          set all faces in the model to a named material\n")
         (display "  -o output-filename        instead of stdout\n")
         (exit 1))
 
       (let* ((args (parse-command-line
                     `(((-s -d -m) ,string->number)
+                      (-L lib-name)
+                      (-S material-name)
                       (-o output-file)
                       ((-c -n -p))
                       (-t x y z)
@@ -41,7 +44,9 @@
              (translate-by #f)
              (do-fix-face-winding #f)
              (print-info #f)
-             (output-port (current-output-port)))
+             (output-port (current-output-port))
+             (material-libraries '())
+             (set-all-to-material #f))
 
         (for-each
          (lambda (arg)
@@ -71,6 +76,11 @@
              ((-t)
               (if translate-by (usage "give -t only once"))
               (set! translate-by (list->vector (map string->number (cdr arg)))))
+             ((-L)
+              (set! material-libraries (cons (cadr arg) material-libraries)))
+             ((-S)
+              (if set-all-to-material (usage "give -S only once"))
+              (set! set-all-to-material (cadr arg)))
              ((--)
               (set! input-files (cdr arg)))))
          args)
@@ -90,6 +100,14 @@
                          (dimension (size-model model dimension)))
                    (if texture-coords-scale
                        (add-simple-texture-coordinates model texture-coords-scale))
+
+                   (if set-all-to-material
+                       (set-all-faces-to-material model set-all-to-material))
+
+                   (cond ((not (null? material-libraries))
+                          (clear-material-libraries model)
+                          (add-material-libraries model material-libraries)))
+
                    (if (or output-file (not print-info))
                        (write-obj-model model output-port))
                    (if output-file (close-output-port output-port)))

@@ -4,8 +4,13 @@
           (scheme file)
           (scheme write)
           (scheme process-context)
+          (foldling command-line)
+          (seth strings)
+          (seth math-3d)
+          (seth model-3d)
           (seth obj-model)
-          (foldling command-line))
+          (seth stl-model)
+          )
 
   (begin
 
@@ -111,6 +116,11 @@
                    (if (or output-file (not print-info))
                        (write-obj-model model output-port))
                    (if output-file (close-output-port output-port)))
+
+                  ((string-ends-with? (car input-files) ".stl")
+                   (read-stl-model-file (car input-files) model)
+                   (loop (cdr input-files)))
+
                   (else
                    (read-obj-model-file (car input-files) model)
                    (loop (cdr input-files)))))

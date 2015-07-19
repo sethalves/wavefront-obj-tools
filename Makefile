@@ -20,6 +20,7 @@ link-libs: very-clean
 	snow2 -s \
 	      -p 'http://foldling.org/snow2/index.scm' \
 	      -p '../snow2-packages/seth' \
+	      -p '../snow2-packages/snow' \
               install '(seth obj-model)' '(seth stl-model)' '(foldling command-line)'
 
 clean:

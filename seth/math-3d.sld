@@ -140,6 +140,7 @@
 
 
           best-aligned-vector
+          worst-aligned-vector
           epsilon
           )
   (import (scheme base)
@@ -191,12 +192,14 @@
                              (string-append result (vector-ref n->s n)))
                          next-v))))))
 
-      (let ((result (if (< v 0)
-                        (string-append "-" (do-loop (- v)))
-                        (do-loop v))))
-        (cond ((equal? result "") "0")
-              ((equal? result "-") "0")
-              (else result))))
+      (if (nan? v)
+          "+nan.0"
+          (let ((result (if (< v 0)
+                            (string-append "-" (do-loop (- v)))
+                            (do-loop v))))
+            (cond ((equal? result "") "0")
+                  ((equal? result "-") "0")
+                  (else result)))))
 
 
     (define (vector-max v)
@@ -317,6 +320,7 @@
     ;; http://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
     ;; http://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
     ;; http://wiki.call-cc.org/eggref/4/quaternions
+    ;; http://www.wolframalpha.com/input/?i=euler%20angles
 
     (define (quaternion->euler~1 q)
       ;; convert a quaternion into rotations about x, y, and z axis.
@@ -863,7 +867,7 @@
              (r (vector-ref P 0)) ;; point on plane
              (n (vector-ref P 1)) ;; plane normal
              (dnV (dot-product n V)))
-        (if (eqv? dnV 0.0) #f
+        (if (= dnV 0.0) #f
             (let ((u (/ (dot-product n (vector3-diff r S0)) dnV)))
               (if (or (< u 0.0) (> u 1.0))
                   #f
@@ -886,6 +890,10 @@
             #f)))
 
 
+    ;; http://mathworld.wolfram.com/Plane-PlaneIntersection.html
+
+
+
     (define (triangle-is-degenerate? T)
       (or (vector3-equal? (vector-ref T 0) (vector-ref T 1))
           (vector3-equal? (vector-ref T 1) (vector-ref T 2))
@@ -903,8 +911,9 @@
     (define (angle-between-vectors v0 v1 . axis)
       ;; return the angle (positive or negative) that rotates
       ;; v0 to v1 around axis or (v0 X v1) if axis is not provided
-      (let* ((aa (acos (dot-product (vector3-normalize v0)
-                                    (vector3-normalize v1))))
+      (let* ((dp (dot-product (vector3-normalize v0) (vector3-normalize v1)))
+             (dp~ (clamp-number dp -1.0 1.0)) ;; the wonders of ieee floating-point
+             (aa (acos dp~))
              (xp (if (null? axis)
                      (cross-product (vector3-normalize v0) (vector3-normalize v1))
                      (car axis)))
@@ -1369,6 +1378,20 @@
               (if (>= abs-dotp best-abs-dotp)
                   (loop (cdr choices) choice abs-dotp)
                   (loop (cdr choices) best best-abs-dotp))))))
+
+
+    (define (worst-aligned-vector v choices)
+      ;; compare v to the normalized vectors in the choices list and
+      ;; return the one that has the smallest abs dot product
+      (let loop ((choices choices)
+                 (worst #f)
+                 (worst-abs-dotp #f))
+        (if (null? choices) worst
+            (let* ((choice (car choices))
+                   (abs-dotp (abs (dot-product choice v))))
+              (if (or (not worst-abs-dotp) (<= abs-dotp worst-abs-dotp))
+                  (loop (cdr choices) choice abs-dotp)
+                  (loop (cdr choices) worst worst-abs-dotp))))))
 
 
     (define-record-type <aa-box>

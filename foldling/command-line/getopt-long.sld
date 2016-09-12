@@ -19,10 +19,12 @@
 ;;
 (define-library (foldling command-line getopt-long)
   (import (scheme base)
-          (foldling command-line getopt))
-  (export getopt-long)
+          (only (foldling command-line) make-command-line-parser)
+          (only (foldling command-line getopt) getopt))
+  (export getopt-long parse-command-line)
   (include "getopt-long.scm")
   (begin
+
     ;; While getopt-long.scm defines a matcher for double-dashed options
     ;; only, the `getopt-long` procedure exported by this library
     ;; implements the combined behavior of that and the standard
@@ -31,4 +33,7 @@
       (let ((getopt-long getopt-long))
         (lambda (arg grammar)
           (or (getopt-long arg grammar)
-              (getopt arg grammar)))))))
+              (getopt arg grammar)))))
+
+    (define parse-command-line
+      (make-command-line-parser getopt-long))))

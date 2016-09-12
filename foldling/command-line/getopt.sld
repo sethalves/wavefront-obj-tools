@@ -18,6 +18,10 @@
 ;; Refer to the README for more details.
 ;;
 (define-library (foldling command-line getopt)
-  (import (scheme base))
-  (export getopt)
-  (include "getopt.scm"))
+  (import (scheme base)
+          (only (foldling command-line) make-command-line-parser))
+  (export getopt parse-command-line)
+  (include "getopt.scm")
+  (begin
+    (define parse-command-line
+      (make-command-line-parser getopt))))

@@ -20,5 +20,5 @@
   (import (scheme base)
           (scheme case-lambda)
           (scheme process-context))
-  (export parse-command-line)
+  (export make-command-line-parser parse-command-line)
   (include "command-line.scm"))

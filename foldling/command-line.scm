@@ -62,9 +62,7 @@
 ;;
 (define normalize-grammar
   (letrec ((fold (lambda (f a l)
-                   (cond ((pair? l)
-                          (fold f (f a (car l)) (cdr l)))
-                         (else a)))))
+                   (if (pair? l) (fold f (f a (car l)) (cdr l)) a))))
     (lambda (grammar)
       (fold (lambda (a g)
               (if (pair? g)
@@ -166,3 +164,15 @@
                      ;; An unmatched argument.
                      (else
                       (lp (cdr args) (cons arg unmatched) matched))))))))))
+
+;;
+;; `make-command-line-parser` constructs a staged version of the
+;; `parse-command-line` procedure that will process its arguments using
+;; the given matching procedure.
+;;
+(define (make-command-line-parser matcher)
+  (case-lambda
+    ((grammar)
+     (parse-command-line matcher grammar))
+    ((arguments grammar)
+     (parse-command-line matcher arguments grammar))))

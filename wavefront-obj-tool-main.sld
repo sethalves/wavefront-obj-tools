@@ -139,6 +139,7 @@
                           (octree (model->octree model aa-box))
                           (face-filter
                            (cond (set-upward-faces-material
+                                  (cerr "set-upward-faces-material\n")
                                   (lambda (model mesh face)
                                     (let ((normal (face->average-normal model face)))
                                       (> (vector3-y normal) 0.5))))
@@ -163,11 +164,12 @@
                            (dimension (size-model model dimension)))
 
                      (cond (texture-coords-scale
-                            (add-simple-texture-coordinates model texture-coords-scale face-filter))
+                            (add-simple-texture-coordinates model
+                                                            (vector texture-coords-scale texture-coords-scale)
+                                                            material face-filter))
                            (texture-map-scale
                             (add-top-texture-coordinates model texture-map-scale material face-filter))
                            (material-to-set
-                            (cerr "HERE HERE HERE\n")
                             (set-all-faces-to-material model material-to-set face-filter)))
 
                      (cond ((not (null? material-libraries))

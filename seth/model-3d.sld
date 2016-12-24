@@ -73,14 +73,18 @@
    shift-face-indices
    ;; mapers/iterators
    for-each-mesh
+   for-each-face
+   for-each-face-corner
    operate-on-faces
    operate-on-face-corners
    ;; utilities
+   combine-near-points
    compact-obj-model
    scale-model
    size-model
    translate-model
    model->octree
+   model->convex-hull
    )
 
   (import (scheme base)
@@ -151,6 +155,11 @@
       (coordinates-compact coords)
       (coordinates-vec coords))
 
+    (define (coordinates-as-numeric-vector coords)
+      (vector-map
+       (lambda (vertex) (vector-map string->number vertex))
+       (coordinates-as-vector coords)))
+
     (define (coordinates-null? coords)
       (coordinates-compact coords)
       (= (vector-length (coordinates-vec coords)) 0))
@@ -160,7 +169,7 @@
     ;; list of meshes.
     (define-record-type <model>
       (make-model~ meshes vertices texture-coordinates normals
-                  material-libraries materials)
+                   material-libraries materials)
       model?
       (meshes model-meshes model-set-meshes!) ;; list of meshes
       (vertices model-vertices model-set-vertices!) ;; coordinates
@@ -210,7 +219,7 @@
                         new-material)))))))
 
 
-   ;; a mesh is a group of triangles defined by indexing into the
+    ;; a mesh is a group of triangles defined by indexing into the
     ;; model's vertexes
     (define-record-type <mesh>
       (make-mesh name faces)
@@ -269,7 +278,7 @@
       (define (face->sorted-indices f)
         (let* ((corners (vector->list (face-corners f)))
                (indices (map face-corner-vertex-index corners)))
-          (sort indices)))
+          (sort indices <)))
       ;; search model for a face with the same vertices
       (let ((face-indices-sorted (face->sorted-indices face))
             (result #f))
@@ -282,12 +291,12 @@
         result))
 
     (define (model-contains-equivalent-face model face tolerance)
-      (let ((face-as-vertices (sort (face->vertices-list model face)))
+      (let ((face-as-vertices (sort (face->vertices-list model face) vector3-sort-compare))
             (result #f))
         (operate-on-faces
          model
          (lambda (mesh other-face)
-           (let ((other-vertices (sort (face->vertices-list model other-face))))
+           (let ((other-vertices (sort (face->vertices-list model other-face) vector3-sort-compare)))
              (let loop ((face-as-vertices face-as-vertices)
                         (other-vertices other-vertices))
                (cond ((and (null? face-as-vertices) (null? other-vertices))
@@ -325,28 +334,24 @@
       (let loop ((deltas (vertex-deltas (face->vertices-list model face))))
         (if (or (null? deltas)
                 (null? (cdr deltas)))
-             #f ;; not degenerate
+            #f ;; not degenerate
             (let ((next-delta (car deltas))
-                  (other-deltas (cdr deltas)))
-              (let inner-loop ((other-deltas other-deltas))
-                (cond ((null? other-deltas) (loop (cdr deltas)))
-                      ((vector3-almost-equal?
-                        next-delta zero-vector vector-tolerance)
-                       #t)
-                      ((vector3-almost-equal?
-                        (car other-deltas) zero-vector vector-tolerance)
-                       #t)
-                      ((vector3-almost-equal?
-                        (vector3-normalize next-delta)
-                        (vector3-normalize (car other-deltas))
-                        vector-tolerance)
-                       #t)
-                      ((vector3-almost-equal?
-                        (vector3-scale (vector3-normalize next-delta) -1.0)
-                        (vector3-normalize (car other-deltas))
-                        vector-tolerance)
-                       #t)
-                      (else (inner-loop (cdr other-deltas)))))))))
+                  (other-delta (cadr deltas)))
+              (cond ((vector3-almost-equal?
+                      next-delta zero-vector vector-tolerance)
+                     #t)
+                    ((vector3-almost-equal?
+                      (vector3-normalize next-delta)
+                      (vector3-normalize other-delta)
+                      vector-tolerance)
+                     #t)
+                    ((vector3-almost-equal?
+                      (vector3-scale (vector3-normalize next-delta) -1.0)
+                      (vector3-normalize other-delta)
+                      vector-tolerance)
+                     #t)
+                    (else (loop (cdr deltas))))))))
+
 
     (define (face-has-concurrent-vertices model face)
       (snow-assert (model? model))
@@ -405,6 +410,25 @@
     (define (for-each-mesh model proc)
       (snow-assert (model? model))
       (for-each proc (model-meshes model)))
+
+
+    (define (for-each-face model proc)
+      (snow-assert (model? model))
+      (for-each-mesh
+       model
+       (lambda (mesh)
+         (for-each
+          proc
+          (mesh-faces mesh)))))
+
+    (define (for-each-face-corner model proc)
+      (snow-assert (model? model))
+      (for-each-face
+       model
+       (lambda (face)
+         (for-each
+          proc
+          (face-corners face)))))
 
 
     ;; call op with and replace every face in model.  op should accept mesh
@@ -550,7 +574,14 @@
         (cond ((not (face-is-degenerate? model face))
                (shift-face-indices
                 face vertex-index-start texture-index-start normal-index-start)
-               (mesh-set-faces! mesh (cons face (mesh-faces mesh)))))))
+               (mesh-set-faces! mesh (cons face (mesh-faces mesh))))
+              (else
+               (cerr "warning: face is degenerate: "
+                     (map
+                      (lambda (face-corner) (face-corner->vertex model face-corner))
+                      face-corners)
+                     "\n"))
+              )))
 
 
     (define (mesh-append-face! model mesh face)
@@ -570,7 +601,38 @@
                                          (if material-a (material-name material-a) ""))
                                         (material-name-b
                                          (if material-b (material-name material-b) "")))
-                                   (string< material-name-a material-name-b))))))
+                                   (string<? material-name-a material-name-b))))))
+
+
+
+    (define (combine-near-points model threshold)
+      (snow-assert (model? model))
+      ;; make a mapping of vertex index to count of nearby vertexes
+      (let* ((coords (model-vertices model))
+             (vertices (coordinates-as-vector coords))
+             (vertex-index->neighbor-count
+              (vector-map
+               (lambda (vertex)
+                 (snow-assert (vector? vertex))
+                 (snow-assert (= (vector-length vertex) 3))
+                 (let ((neighbor-count 0))
+                   (let loop ((j 0))
+                     (cond ((= j (vector-length vertices)) #t)
+                           ((eq? vertex (vector-ref vertices j))
+                            (loop (+ j 1)))
+                           ((>= (distance-between-points vertex (vector-ref vertices j)) threshold)
+                            (set! neighbor-count (+ neighbor-count 1))
+                            (loop (+ j 1)))
+                           (else
+                            (loop (+ j 1)))))
+                   neighbor-count))
+               vertices)))
+        (cerr vertex-index->neighbor-count "\n")
+        ;;
+        ;; TODO finish this
+        ;;
+
+        #t))
 
 
     (define (compact-obj-model model)
@@ -791,7 +853,7 @@
                            (let* ((dv (vector3-diff vertex vertex-0))
                                   (x (+ (dot-product u-axis dv) x-offset))
                                   (y (dot-product v-axis dv)))
-                             (vector2 (* (vector2-x scale) x) (* (vector2-y scale) y)))))
+                             (vector (* (vector2-x scale) x) (* (vector2-y scale) y)))))
                         (vertex-transformer-no-offset
                          (lambda (vertex) (vertex-transformer vertex 0.0)))
                         ;; figure out how much we have to slide this face over
@@ -989,5 +1051,236 @@
            (octree-add-element! octree face (face->aa-box model face))
            face))
         octree))
+
+
+    (define (convex-hull-find-a-triangle vertices initial-i)
+      ;; find a valid triangle
+      (let loop-i ((i initial-i))
+        (cond ((= i (vector-length vertices)) #f)
+              (else
+               (let loop-j ((j 0))
+                 (cond ((= j (vector-length vertices))
+                        (loop-i (+ i 1)))
+                       (else
+                        (let loop-k ((k 0))
+                          (cond ((= k (vector-length vertices))
+                                 (loop-j (+ j 1)))
+                                ((triangle-is-degenerate? (vector
+                                                           (vector-ref vertices i)
+                                                           (vector-ref vertices j)
+                                                           (vector-ref vertices k))
+                                                          vector-tolerance)
+                                 (loop-k (+ k 1)))
+                                (else
+                                 (vector i j k)))))))))))
+
+    (define (convex-hull-find-a-triangle-with-jk vertices j k)
+      ;; find a valid triangle
+      (let loop-i ((i 0))
+        (cond ((= i (vector-length vertices)) #f)
+              ((triangle-is-degenerate? (vector
+                                         (vector-ref vertices i)
+                                         (vector-ref vertices j)
+                                         (vector-ref vertices k))
+                                        vector-tolerance)
+               (loop-i (+ i 1)))
+              (else
+               (vector i j k)))))
+
+
+    (define (convex-hull-points-above-triangle vertices T-indices)
+      ;; count the number of points above the triangle's plane
+      (let* ((t0 (vector-ref T-indices 0))
+             (t1 (vector-ref T-indices 1))
+             (t2 (vector-ref T-indices 2))
+             (T (vector (vector-ref vertices t0)
+                        (vector-ref vertices t1)
+                        (vector-ref vertices t2))))
+        (if (triangle-is-degenerate? T vector-tolerance) #f
+            (let ((plane (triangle->plane T)))
+              (let loop ((i 0)
+                         (above 0))
+                (cond ((= i (vector-length vertices)) above)
+                      ((= i t0) (loop (+ i 1) above))
+                      ((= i t1) (loop (+ i 1) above))
+                      ((= i t2) (loop (+ i 1) above))
+                      ((point-is-above-plane (vector-ref vertices i) plane)
+                       (loop (+ i 1) (+ above 1)))
+                      (else
+                       (loop (+ i 1) above))))))))
+
+
+    (define (convex-hull-any-points-above-triangle? vertices T-indices)
+      ;; count the number of points above the triangle's plane
+      (let* ((t0 (vector-ref T-indices 0))
+             (t1 (vector-ref T-indices 1))
+             (t2 (vector-ref T-indices 2))
+             (T (vector (vector-ref vertices t0)
+                        (vector-ref vertices t1)
+                        (vector-ref vertices t2))))
+        (if (triangle-is-degenerate? T vector-tolerance) #t
+            (let ((plane (triangle->plane T)))
+              ;; (cout T " -- " plane "\n")
+              (let loop ((i 0))
+                (cond ((= i (vector-length vertices)) #f)
+                      ((= i t0) (loop (+ i 1)))
+                      ((= i t1) (loop (+ i 1)))
+                      ((= i t2) (loop (+ i 1)))
+                      ((point-is-above-plane (vector-ref vertices i) plane) #t)
+                      (else (loop (+ i 1)))))))))
+
+
+    (define (convex-hull-search-for-hull-lift-vertex vertices T-indices)
+      ;; replace the first index in the triangle with other indices, search for one that puts
+      ;; the fewest points above the triangle's plane
+      (let ((T-with-i (lambda (i)
+                        (vector i
+                                (vector-ref T-indices 1)
+                                (vector-ref T-indices 2)))))
+        (let loop ((i 0)
+                   (best-i (vector-ref T-indices 0))
+                   (best-above (convex-hull-points-above-triangle vertices (T-with-i (vector-ref T-indices 0)))))
+          (cond ((= i (vector-length vertices)) (T-with-i best-i))
+                ((= best-above 0) (T-with-i best-i))
+                ((= i best-i) (loop (+ i 1) best-i best-above))
+                ((= i (vector-ref T-indices 1)) (loop (+ i 1) best-i best-above))
+                ((= i (vector-ref T-indices 2)) (loop (+ i 1) best-i best-above))
+                (else
+                 (let ((above-for-this-i (convex-hull-points-above-triangle vertices (T-with-i i))))
+                   (cond ((not best-above) (loop (+ i 1) i above-for-this-i))
+                         ((not above-for-this-i) (loop (+ i 1) best-i best-above))
+                         (else
+                          (if (< above-for-this-i best-above)
+                              (loop (+ i 1) i above-for-this-i)
+                              (loop (+ i 1) best-i best-above))))))))))
+
+
+    (define (convex-hull-rotate-triangle T-indices)
+      ;; rotate the vertex indices but keep the normal the same
+      (vector (vector-ref T-indices 1)
+              (vector-ref T-indices 2)
+              (vector-ref T-indices 0)))
+
+
+    (define (convex-hull-search-for-hull-lift-triangle vertices T-indices)
+      ;; replace indices of the triangle until we find one that has no points above
+      ;; the plane of the triangle
+      (let loop ((T-indices T-indices)
+                 (above (convex-hull-points-above-triangle vertices T-indices))
+                 (no-progress 0))
+        (cond ((= above 0) T-indices)
+              ((= no-progress 6) #f)
+              (else
+               (let* ((spun-T-indices (convex-hull-rotate-triangle T-indices))
+                      (spun-lifted-T-indices (convex-hull-search-for-hull-lift-vertex vertices spun-T-indices))
+                      (new-above (convex-hull-points-above-triangle vertices spun-lifted-T-indices)))
+                 (loop spun-lifted-T-indices
+                       new-above
+                       (if (= above new-above) (+ no-progress 1) no-progress)))))))
+
+
+    (define (convex-hull-append-face model mesh T-indices)
+      (let* ((face-corners (vector-map
+                            (lambda (vertex-index)
+                              (make-face-corner vertex-index 'unset 'unset))
+                            T-indices))
+             (face (make-face model face-corners #f)))
+        (if (not (model-contains-equivalent-face model face vector-tolerance))
+            (mesh-append-face! model mesh face))))
+
+
+    (define (convex-hull-finish model faces-indices)
+      (let ((hull-model (make-empty-model))
+            (mesh (make-mesh #f '())))
+        (model-prepend-mesh! hull-model mesh)
+
+        (model-set-vertices! hull-model (model-vertices model))
+
+        (for-each
+         (lambda (face-indices)
+           (convex-hull-append-face hull-model mesh face-indices))
+         faces-indices)
+        hull-model))
+
+
+    (define (convex-hull-find-initial-triangle vertices)
+      ;; attempt to find a triangle made of model vertices which has
+      ;; no points "above" it.
+      (let loop ((i 0))
+        (cond ((= i (vector-length vertices)) #f)
+              (else
+               (let ((initial-triangle (convex-hull-find-a-triangle vertices i)))
+                 (if (not initial-triangle) (loop (+ i 1))
+                     (let ((T0 (convex-hull-search-for-hull-lift-triangle vertices initial-triangle)))
+                       (if T0
+                           T0
+                           (loop (+ i 1))))))))))
+
+
+    (define (model->convex-hull model)
+      ;; slow and naive gift-wrapping convex-hull finder
+      (let* ((vertices (coordinates-as-numeric-vector (model-vertices model)))
+             (T0 (convex-hull-find-initial-triangle vertices)))
+        (if (not T0) #f
+            (let* ((processed-edges (make-hash-table))
+                   (add-edge (lambda (edges new-edge)
+                               (if (hash-table-exists? processed-edges new-edge)
+                                   edges
+                                   (cons new-edge edges)))))
+              (if (> (convex-hull-points-above-triangle vertices T0) 0)
+                  (begin
+                    (cerr "model->convex-hull failed to find initial triangle.")
+                    #f)
+                  (let loop ((triangles (list T0))
+                             ;; The edges are reversed so that the handedness changes.
+                             ;; this forces the next point found to be in a differnt
+                             ;; triangle than the one that produced the edge.
+                             (edges (list (vector (vector-ref T0 1) (vector-ref T0 0))
+                                          (vector (vector-ref T0 2) (vector-ref T0 1))
+                                          (vector (vector-ref T0 0) (vector-ref T0 2)))))
+                    (cond ((null? edges)
+                           (convex-hull-finish model triangles))
+                          (else
+                           ;; (cout edges "\n")
+                           (let* ((edge (car edges))
+                                  (j (vector-ref edge 0))
+                                  (k (vector-ref edge 1))
+                                  (T0 (convex-hull-find-a-triangle-with-jk vertices j k))
+                                  (T1 (convex-hull-search-for-hull-lift-vertex vertices T0))
+                                  )
+                             (hash-table-set! processed-edges (vector j k) #t)
+                             (hash-table-set! processed-edges (vector k j) #t)
+
+                             (let* ((edge-0 (vector (vector-ref T1 1) (vector-ref T1 0)))
+                                    (edge-1 (vector (vector-ref T1 2) (vector-ref T1 1)))
+                                    (edge-2 (vector (vector-ref T1 0) (vector-ref T1 2))))
+                               (loop
+                                (cons T1 triangles)
+                                (add-edge (add-edge
+                                           (add-edge (cdr edges) edge-0)
+                                           edge-1)
+                                          edge-2))))))))))))
+
+    ;; (define (model->convex-hull model)
+    ;;   (let ((vertices (coordinates-as-numeric-vector (model-vertices model)))
+    ;;         (hull-model (make-empty-model))
+    ;;         (mesh (make-mesh #f '())))
+    ;;     (model-prepend-mesh! hull-model mesh)
+    ;;     (model-set-vertices! hull-model (model-vertices model))
+    ;;     (do ((i 0 (+ i 1)))
+    ;;         ((= i (vector-length vertices)) #t)
+    ;;       (cout i " / " (vector-length vertices) "\n")
+    ;;       (do ((j 0 (+ j 1)))
+    ;;           ((= j (vector-length vertices)) #t)
+    ;;         (do ((k 0 (+ k 1)))
+    ;;             ((= k (vector-length vertices)) #t)
+    ;;           (cond ((= i j) #t)
+    ;;                 ((= j k) #t)
+    ;;                 ((= i k) #t)
+    ;;                 ((convex-hull-any-points-above-triangle? vertices (vector i j k)) #t)
+    ;;                 (else
+    ;;                  (convex-hull-append-face hull-model mesh (vector i j k)))))))
+    ;;     hull-model))
+
 
     ))

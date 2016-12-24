@@ -23,7 +23,9 @@
         (display " [args] input-file.obj ...\n")
         (display "  -s scale-factor           scale points by factor\n")
         (display "  -d max-dimension          scale model to max-dimension\n")
+        (display "  --hull                    output convex hull\n")
         (display "  -c                        reuse coincident points\n")
+        (display "  -C threshold              combine near points\n")
         (display "  -n                        flip faces so outsides face as normals\n")
         (display "  -p                        print information about model\n")
         (display "  --px                      print x-dimension of model\n")
@@ -40,11 +42,11 @@
         (exit 1))
 
       (let* ((args (parse-command-line
-                    `(((-s -d -m) ,string->number)
+                    `(((-s -d -m -C) ,string->number)
                       (-L lib-name)
                       (-S material-name)
                       (-o output-file)
-                      ((-c -n -p --px --py --pz -U -T))
+                      ((-c -n -p --px --py --pz -U -T --hull))
                       (-t x y z)
                       (-M x z)
                       (-?) (-h))))
@@ -53,6 +55,8 @@
              (input-files '())
              (output-file #f)
              (compact-points #f)
+             (convex-hull #f)
+             (combine-points-threshold #f)
              (texture-coords-scale #f)
              (set-upward-faces-material #f)
              (set-upper-surface-material #f)
@@ -83,6 +87,12 @@
              ((-c)
               (if compact-points (usage "give -c only once"))
               (set! compact-points #t))
+             ((--hull)
+              (if convex-hull (usage "give --hull only once"))
+              (set! convex-hull #t))
+             ((-C)
+              (if combine-points-threshold (usage "give -m only once"))
+              (set! combine-points-threshold (cadr arg)))
              ((-m)
               (if texture-coords-scale (usage "give -m only once"))
               (set! texture-coords-scale (cadr arg)))
@@ -135,11 +145,12 @@
                              (make-material "default"))))
           (let loop ((input-files input-files))
             (cond ((null? input-files)
+                   (if convex-hull
+                       (set! model (model->convex-hull model)))
                    (let* ((aa-box (model-aa-box model))
                           (octree (model->octree model aa-box))
                           (face-filter
                            (cond (set-upward-faces-material
-                                  (cerr "set-upward-faces-material\n")
                                   (lambda (model mesh face)
                                     (let ((normal (face->average-normal model face)))
                                       (> (vector3-y normal) 0.5))))
@@ -158,6 +169,7 @@
                                  (else
                                   (lambda (model mesh face) #t)))))
                      (if compact-points (compact-obj-model model))
+                     (if combine-points-threshold (combine-near-points model combine-points-threshold))
                      (if do-fix-face-winding (fix-face-winding model))
                      (if translate-by (translate-model model translate-by))
                      (cond (scale (scale-model model scale))
@@ -211,6 +223,12 @@
                    (display "dimensions: " (current-error-port))
                    (write `(,(model-dimensions model)) (current-error-port))
                    (newline (current-error-port))
+
+                   (cout "materials: " (model-material-libraries model) "\n")
+                   (cout "vertices: " (vector-length (coordinates-as-vector (model-vertices model))) "\n")
+                   (cout "meshes: " (length (model-meshes model)) "\n")
+
+
                    )))
 
           (let ((size-printer

@@ -32,6 +32,7 @@
           line-b
           make-line
           quat-s
+          quat-w
           quat-x
           quat-y
           quat-z
@@ -97,6 +98,7 @@
           triangle-normal
           triangle->plane
           point-is-above-plane
+          point-is-above-or-on-plane
           angle-between-vectors
           rotation-between-vectors
           quaternion-normalize
@@ -120,6 +122,7 @@
           matrix-A*B
           matrix-*
           matrix-translation
+          matrix-rotation-quaternion
           matrix-rotation-x
           matrix-rotation-y
           matrix-rotation-z
@@ -154,12 +157,16 @@
           aa-box-low-corner aa-box-set-low-corner!
           aa-box-high-corner aa-box-set-high-corner!
           aa-box-contains-aa-box
-
+          aa-box-center
 
           best-aligned-vector
           worst-aligned-vector
           epsilon
           vector3-sort-compare
+
+          polar-coordinates->cartesian
+          cartesian-coordinates->polar
+          vector-3->strings
           )
   (import (scheme base)
           (scheme write)
@@ -184,45 +191,49 @@
     (define epsilon 0.000001)
 
 
-    (define (number->pretty-string v places)
-      ;; I didn't want to write this.  Why did I have to write this?
-      ;; number->string will return scientific notation on some platforms.
-      (define epsilon (expt 10 (inexact (- (- places) 1))))
-      (define n->s (vector "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"))
-      (define (first-power v)
-        (let loop ((p 1))
-          (if (> (expt 10 (inexact p)) v) (- p 1)
-              (loop (+ p 1)))))
-      (define (next-digit v p)
-        (let loop ((v v)
-                   (result 0))
-          (let ((x (expt 10 (inexact p))))
-            (cond ((< v (- x epsilon)) result)
+    (define (number->pretty-string v . maybe-places)
+      (let ((places (if (null? maybe-places) 6 (car maybe-places))))
+        ;; I didn't want to write this.  Why did I have to write this?
+        ;; number->string will return scientific notation on some platforms.
+        (define epsilon (expt 10 (inexact (- (- places) 1))))
+        (define n->s (vector "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"))
+        (define (first-power v)
+          (let loop ((p 1))
+            (if (> (expt 10 (inexact p)) v) (- p 1)
+                (loop (+ p 1)))))
+        (define (next-digit v p)
+          (let loop ((v v)
+                     (result 0))
+            (let ((x (expt 10 (inexact p))))
+              (cond ((< v (- x epsilon)) result)
+                    (else
+                     (loop (- v x) (+ result 1)))))))
+        (define (do-loop v)
+          (let loop ((p (if (>= v 0) (first-power v) (first-power (- v))))
+                     (result "")
+                     (v v))
+            (cond ((< v (expt 10 (inexact (- places))))
+                   (if (>= p 0)
+                       (loop (- p 1) (string-append result "0") v)
+                       result))
+                  ;; ((= v 0.0) (if (>= p 0) (string-append result "0") result))
                   (else
-                   (loop (- v x) (+ result 1)))))))
-      (define (do-loop v)
-        (let loop ((p (if (>= v 0) (first-power v) (first-power (- v))))
-                   (result "")
-                   (v v))
-          (cond ((< v (expt 10 (inexact (- places)))) result)
-                ((= v 0) result)
-                (else
-                 (let* ((n (next-digit v p))
-                        (next-v (- v (* n (expt 10 (inexact p))))))
-                   (loop (- p 1)
-                         (if (and (> next-v 0) (= p 0))
-                             (string-append result (vector-ref n->s n) ".")
-                             (string-append result (vector-ref n->s n)))
-                         next-v))))))
+                   (let* ((n (next-digit v p))
+                          (next-v (- v (* n (expt 10 (inexact p))))))
+                     (loop (- p 1)
+                           (if (and (> next-v 0) (= p 0))
+                               (string-append result (vector-ref n->s n) ".")
+                               (string-append result (vector-ref n->s n)))
+                           next-v))))))
 
-      (if (nan? v)
-          "+nan.0"
-          (let ((result (if (< v 0)
-                            (string-append "-" (do-loop (- v)))
-                            (do-loop v))))
-            (cond ((equal? result "") "0")
-                  ((equal? result "-") "0")
-                  (else result)))))
+        (if (nan? v)
+            "+nan.0"
+            (let ((result (if (< v 0)
+                              (string-append "-" (do-loop (- v)))
+                              (do-loop v))))
+              (cond ((equal? result "") "0")
+                    ((equal? result "-") "0")
+                    (else result))))))
 
 
     (define (vector-max v)
@@ -318,6 +329,7 @@
 
 
     (define (quat-s q) (vector-ref q 0))
+    (define (quat-w q) (vector-ref q 0))
     (define (quat-x q) (vector-ref q 1))
     (define (quat-y q) (vector-ref q 2))
     (define (quat-z q) (vector-ref q 3))
@@ -996,6 +1008,9 @@
              (< (vector3-z (vector-ref S 0)) (vector3-z aa-box-high)))))
 
 
+    (define (aa-box-center aa-box)
+      (vector3-scale (vector3-sum (aa-box-low-corner aa-box) (aa-box-high-corner aa-box)) 0.5))
+
 
     (define (triangle-is-degenerate? T tolerance)
       (let ((T0 (vector-ref T 0))
@@ -1027,7 +1042,7 @@
               (triangle-normal T)))
 
 
-    (define (point-is-above-plane P plane)
+    (define (point-is-above-plane~ P plane tester)
       ;; P is a vector of size 3.
       ;; plane is #(#(point) #(normal-vector))
       ;; https://www.opengl.org/discussion_boards/showthread.php/183759-Finding-if-a-point-is-in-front-or-behind-a-plane
@@ -1045,8 +1060,14 @@
       (let* ((plane-normal (vector-ref plane 1))
              (AB (vector3-diff P (vector-ref plane 0)))
              (dot (dot-product AB plane-normal)))
-        (> 0 dot)))
+        (tester 0 dot)))
 
+
+    (define (point-is-above-plane P plane)
+      (point-is-above-plane~ P plane <))
+
+    (define (point-is-above-or-on-plane P plane)
+      (point-is-above-plane~ P plane <=))
 
     (define (angle-between-vectors v0 v1 . axis)
       ;; return the angle (positive or negative) that rotates
@@ -1293,6 +1314,21 @@
               (vector 0 0 1 (vector3-z v))
               (vector 0 0 0 1)))
 
+
+    (define (matrix-rotation-quaternion q)
+      (let* ((qx (quat-x q))
+             (qy (quat-y q))
+             (qz (quat-z q))
+             (qw (quat-w q))
+             (qx2 (* qx qx))
+             (qy2 (* qy qy))
+             (qz2 (* qz qz))
+             )
+        (vector
+         (vector (- (- 1.0 (* 2.0 qy2)) (* 2.0 qz2)) (- (* 2.0 qx qy) (* 2.0 qz qw)) (+ (* 2.0 qx qz) (* 2.0 qy qw)) 0.0)
+         (vector (+ (* 2.0 qx qy) (* 2.0 qz qw)) (- (- 1.0 (* 2.0 qx2)) (* 2.0 qz2)) (- (* 2.0 qy qz) (* 2.0 qx qw)) 0.0)
+         (vector (- (* 2.0 qx qz) (* 2.0 qy qw)) (+ (* 2.0 qy qz) (* 2.0 qx qw)) (- (- 1.0 (* 2.0 qx2)) (* 2.0 qy2)) 0.0)
+         (vector 0.0 0.0 0.0 1.0))))
 
     (define (matrix-rotation-x a)
       (vector (vector 1       0           0 0)
@@ -1637,6 +1673,22 @@
              (>= (vector3-z big-box-high) (vector3-z small-box-high)))))
 
 
+    (define (polar-coordinates->cartesian radius theta phi)
+      ;; https://en.wikipedia.org/wiki/Spherical_coordinate_system
+      (vector (* radius (* (sin theta) (cos phi)))
+              (* radius (* (sin theta) (sin phi)))
+              (* radius (cos theta))))
+
+    (define (cartesian-coordinates->polar x y z)
+      ;; https://en.wikipedia.org/wiki/Spherical_coordinate_system
+      (let ((radius (sqrt (+ (* x x) (* y y) (* z z)))))
+        (if (= radius 0.0)
+            (vector 0 0 0)
+            (vector radius
+                    (acos (/ z radius))
+                    (atan2 y x)))))
+
+
     (define (vector3-sort-compare a b)
       (cond ((< (vector3-x a) (vector3-x b)) #t)
             ((> (vector3-x a) (vector3-x b)) #f)
@@ -1644,4 +1696,10 @@
             ((> (vector3-y a) (vector3-y b)) #f)
             ((< (vector3-z a) (vector3-y b)) #t)
             (else #f)))
+
+    (define (vector-3->strings v)
+      (vector (number->pretty-string (vector-ref v 0) 6)
+              (number->pretty-string (vector-ref v 1) 6)
+              (number->pretty-string (vector-ref v 2) 6)))
+
     ))

@@ -10,6 +10,7 @@
           (seth model-3d)
           (seth obj-model)
           (seth stl-model)
+          (seth scad-model)
           (seth cout)
           )
 
@@ -68,6 +69,7 @@
              (print-y-size #f)
              (print-z-size #f)
              (output-port (current-output-port))
+             (output-type 'obj)
              (material-libraries '())
              (material-to-set #f))
 
@@ -136,8 +138,12 @@
 
         (if (and scale dimension) (usage "don't use both -s and -d"))
         (if (null? input-files) (usage "give at least one input filename"))
-        (if output-file
-            (set! output-port (open-output-file output-file)))
+        (cond (output-file
+               (set! output-port (open-output-file output-file))
+               (cond ((string-ends-with? output-file ".stl")
+                      (set! output-type 'stl))
+                     ((string-ends-with? output-file ".scad")
+                      (set! output-type 'scad)))))
 
         (let* ((model (make-empty-model))
                (material (if material-to-set
@@ -145,8 +151,9 @@
                              (make-material "default"))))
           (let loop ((input-files input-files))
             (cond ((null? input-files)
-                   (if convex-hull
-                       (set! model (model->convex-hull model)))
+                   (cond (convex-hull
+                          (compact-obj-model model)
+                          (set! model (model->convex-hull model))))
                    (let* ((aa-box (model-aa-box model))
                           (octree (model->octree model aa-box))
                           (face-filter
@@ -192,7 +199,12 @@
                                               (not print-x-size)
                                               (not print-y-size)
                                               (not print-z-size)))
-                         (write-obj-model model output-port))
+                         (cond ((eq? output-type 'stl)
+                                (write-stl-model model output-port))
+                               ((eq? output-type 'scad)
+                                (write-scad-file (list (model->scad-polyhedron model)) output-port))
+                               (else
+                                (write-obj-model model output-port))))
                      (if output-file (close-output-port output-port))))
 
                   ((string-ends-with? (car input-files) ".stl")

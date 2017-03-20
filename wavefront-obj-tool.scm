@@ -16,6 +16,7 @@ exec csi -include-path /usr/local/share/scheme -s $0 "$@"
 (include "seth/model-3d.sld")
 (include "seth/obj-model.sld")
 (include "seth/stl-model.sld")
+(include "seth/scad-model.sld")
 (include "wavefront-obj-tool-main.sld")
 
 

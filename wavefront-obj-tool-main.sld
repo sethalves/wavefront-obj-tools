@@ -175,8 +175,8 @@
                                       (eq? center-pick face))))
                                  (else
                                   (lambda (model mesh face) #t)))))
-                     (if compact-points (compact-obj-model model))
                      (if combine-points-threshold (combine-near-points model combine-points-threshold))
+                     (if compact-points (compact-obj-model model))
                      (if do-fix-face-winding (fix-face-winding model))
                      (if translate-by (translate-model model translate-by))
                      (cond (scale (scale-model model scale))

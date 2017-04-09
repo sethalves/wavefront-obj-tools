@@ -100,6 +100,7 @@
           (srfi 95)
           (snow assert)
           (snow input-parse)
+          (snow random)
           (seth cout)
           (seth math-3d)
           (seth octree))
@@ -598,9 +599,8 @@
       (snow-assert (mesh? mesh))
       (snow-assert (list? face-corners))
       (let ((face (make-face model (list->vector face-corners) material)))
+        (shift-face-indices face vertex-index-start texture-index-start normal-index-start)
         (cond ((not (face-is-degenerate? model face))
-               (shift-face-indices
-                face vertex-index-start texture-index-start normal-index-start)
                (mesh-set-faces! mesh (cons face (mesh-faces mesh))))
               (else
                (cerr "warning: face is degenerate: "
@@ -936,7 +936,11 @@
          (snow-assert (mesh? mesh))
          (snow-assert (face? face))
          (if (face-filter model mesh face)
-             (let ((vertices (face->vertices model face)))
+             (let ((vertices (face->vertices model face))
+                   ;; pick a random offset for this face
+                   (face-uv-offset (vector
+                                    (/ (random-fixnum 1000.0) 1000.0)
+                                    (/ (random-fixnum 1000.0) 1000.0))))
                (snow-assert (> (vector-length vertices) 2))
                (let-values (((u-axis v-axis) (pick-u-v-axis vertices)))
                  (let* ((vertex-0 (vector-ref vertices 0))
@@ -948,7 +952,9 @@
                            (let* ((dv (vector3-diff vertex vertex-0))
                                   (x (+ (dot-product u-axis dv) x-offset))
                                   (y (dot-product v-axis dv)))
-                             (vector (* (vector2-x scale) x) (* (vector2-y scale) y)))))
+                             (vector2-sum face-uv-offset
+                                          (vector (* (vector2-x scale) x)
+                                                  (* (vector2-y scale) y))))))
                         (vertex-transformer-no-offset
                          (lambda (vertex) (vertex-transformer vertex 0.0)))
                         ;; figure out how much we have to slide this face over

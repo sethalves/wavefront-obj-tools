@@ -14,7 +14,7 @@ uninstall:
 	rm -f /usr/local/bin/wavefront-obj-tool
 
 libs:
-	snow2 -p 'http://foldling.org/snow2/index.scm' install '(seth obj-model)' '(seth stl-model)' '(seth scad-model)' '(foldling command-line)' '(seth octree)'
+	snow2 -p 'http://foldling.org/snow2/index.scm' install '(seth obj-model)' '(seth stl-model)' '(seth scad-model)' '(foldling command-line)' '(seth octree)' '(snow random)'
 
 link-libs: very-clean
 	snow2 -s \
@@ -22,7 +22,7 @@ link-libs: very-clean
 	      -p '../snow2-packages/seth' \
 	      -p '../snow2-packages/snow' \
 		  -p '../seth-snow2-misc' \
-			install '(seth obj-model)' '(seth stl-model)' '(seth scad-model)' '(foldling command-line)' '(seth octree)'
+		install '(seth obj-model)' '(seth stl-model)' '(seth scad-model)' '(foldling command-line)' '(seth octree)' '(snow random)'
 
 clean:
 	rm -f *~ wavefront-obj-tool

@@ -7,6 +7,7 @@
           octree-bounds octree-set-bounds!
           octree-add-element!
           octree-ray-intersection
+          octree-triangle-intersection
           )
   (import (scheme base)
           (snow assert)
@@ -118,5 +119,21 @@
                             '()))
                       (vector->list (octree-children octree))))))
 
+
+    (define (octree-triangle-intersection octree T)
+      ;; (aa-box-intersects-aa-box box0 box1)
+      (snow-assert (octree? octree))
+      (snow-assert (triangle? T))
+      (let ((T-aa-box (make-aa-box (triangle-p0 T) (triangle-p0 T))))
+        (aa-box-add-point! T-aa-box (triangle-p1 T))
+        (aa-box-add-point! T-aa-box (triangle-p2 T))
+        (if (not (aa-box-intersects-aa-box T-aa-box (octree-bounds octree)))
+            '()
+            (apply append (list octree)
+                   (map (lambda (child)
+                          (if child
+                              (octree-triangle-intersection child T)
+                              '()))
+                        (vector->list (octree-children octree)))))))
 
     ))

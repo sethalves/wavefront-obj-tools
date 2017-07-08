@@ -19,9 +19,11 @@ instructions assume you're using CHICKEN on Ubuntu.
 
 ### Build wavefront-obj-tools
 
-`cd wavefront-obj-tools`
-`make`
-`sudo make install`
+```
+cd wavefront-obj-tools
+make
+sudo make install
+```
 
 ## running
 

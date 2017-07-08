@@ -1,5 +1,10 @@
 # Wavefront OBJ Model-File Utilities
 
+This program does various manipulations of [Wavefront OBJ model files](https://en.wikipedia.org/wiki/Wavefront_.obj_file).
+In addition to reading, manipulating, and writing OBJ files, it can read from
+[STL](https://en.wikipedia.org/wiki/STL_(file_format)) files and export to
+[STL](https://en.wikipedia.org/wiki/STL_(file_format)) files or a form of [OpenSCAD](http://www.openscad.org/) input file.
+
 ## Installation
 
 This program can be run in various scheme interpreters/compilers: Chibi, CHICKEN, Foment, Gauche, or Sagittarius.  These

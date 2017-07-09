@@ -8,7 +8,7 @@ In addition to reading, manipulating, and writing OBJ files, it can read from
 ## Installation
 
 This program can be run in various scheme interpreters/compilers: Chibi, CHICKEN, Foment, Gauche, or Sagittarius.  These
-instructions assume you're using CHICKEN on Ubuntu.
+instructions assume you're using CHICKEN (4.9 or newer) on Ubuntu 16 (if you're on Ubuntu 14, see ppa:jonathonf/lisp).
 
 ### Install CHICKEN scheme
 

@@ -16,6 +16,7 @@ exec csi -include-path /usr/local/share/scheme -s $0 "$@"
 (include "seth/strings.sld")
 (include "seth/math-3d.sld")
 (include "seth/octree.sld")
+(include "seth/graph.sld")
 (include "seth/model-3d.sld")
 (include "seth/obj-model.sld")
 (include "seth/stl-model.sld")

@@ -193,9 +193,29 @@
                            (dimension (size-model model dimension)))
 
                      (cond (texture-coords-scale
-                            (add-simple-texture-coordinates model
-                                                            (vector texture-coords-scale texture-coords-scale)
-                                                            material face-filter))
+                            ;; (add-simple-texture-coordinates model
+                            ;;                                 (vector texture-coords-scale texture-coords-scale)
+                            ;;                                 material face-filter)
+
+                            ;; (let* ((edge-graph (model->edge-graph model))
+                            ;;        (node (vector-ref edge-graph 0))
+                            ;;        (face (edge-graph-node-face node))
+                            ;;        (edge (make-face-edge model
+                            ;;                              face
+                            ;;                              (vector-ref (face-corners face) 1)
+                            ;;                              (vector-ref (face-corners face) 2)
+                            ;;                              ))
+                            ;;        )
+                            ;;   (model-clear-texture-coordinates! model)
+                            ;;   (apply-texture-along-edge-graph model node edge
+                            ;;                                   (vector 0 0)
+                            ;;                                   (vector texture-coords-scale 0)
+                            ;;                                   material face-filter)
+                            ;;   )
+
+                            (let* ((edge-graph (model->edge-graph model)))
+                              (model-clear-texture-coordinates! model)
+                              (apply-texture-across-edge-graph model edge-graph material face-filter texture-coords-scale)))
                            (texture-map-scale
                             (add-top-texture-coordinates model texture-map-scale material face-filter))
                            (material-to-set

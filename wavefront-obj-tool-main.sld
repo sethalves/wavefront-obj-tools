@@ -35,8 +35,10 @@
         (display "  --pz                      print z-dimension of model\n")
         (display "  -m scale                  set some texture coordinates\n")
         (display "  -M x z                    map a single y-normal texture (use -S also)\n")
+        (display "  --color x y z             set vertices to color, values are 0 to 1\n")
         (display "  -U                        set up-facing faces to a material (use -S also)\n")
         (display "  -T                        set material of upper surface (use -S also)\n")
+        (display "  -r                        smooth normals\n")
         (display "  -t x y z                  translate model by an offset\n")
         (display "  -L material-lib-filename  include the named material library\n")
         (display "  -S material-name          set faces in the model to a named material\n")
@@ -50,6 +52,7 @@
                       (-o output-file)
                       ((-c -n -p --px --py --pz -U -T --hull --bullet-hull))
                       (-t x y z)
+                      (--color x y z)
                       (-M x z)
                       (-?) (-h) (--help))))
              (scale #f)
@@ -66,6 +69,7 @@
              (texture-map-scale #f)
              (translate-by #f)
              (do-fix-face-winding #f)
+             (do-smooth-normals #f)
              (print-info #f)
              (print-x-size #f)
              (print-y-size #f)
@@ -73,7 +77,9 @@
              (output-port (current-output-port))
              (output-type 'obj)
              (material-libraries '())
-             (material-to-set #f))
+             (material-to-set #f)
+             (color-to-set #f)
+             )
 
         (for-each
          (lambda (arg)
@@ -123,9 +129,15 @@
              ((-n)
               (if do-fix-face-winding (usage "give -n only once"))
               (set! do-fix-face-winding #t))
+             ((-r)
+              (if do-smooth-normals (usage "give -r only once"))
+              (set! do-smooth-normals #t))
              ((-t)
               (if translate-by (usage "give -t only once"))
               (set! translate-by (list->vector (map string->number (cdr arg)))))
+             ((--color)
+              (if color-to-set (usage "give --color only once"))
+              (set! color-to-set (list->vector (map string->number (cdr arg)))))
              ((-L)
               (set! material-libraries (cons (cadr arg) material-libraries)))
              ((-S)
@@ -187,32 +199,14 @@
                                   (lambda (model mesh face) #t)))))
                      (if combine-points-threshold (combine-near-points model combine-points-threshold))
                      (if compact-points (compact-obj-model model))
-                     (if do-fix-face-winding (fix-face-winding model))
+                     (if color-to-set (set-vertex-colors! model color-to-set face-filter))
+                     (if do-fix-face-winding (fix-face-winding! model))
+                     (if do-smooth-normals (smooth-normals! model))
                      (if translate-by (translate-model model translate-by))
                      (cond (scale (scale-model model scale))
                            (dimension (size-model model dimension)))
 
                      (cond (texture-coords-scale
-                            ;; (add-simple-texture-coordinates model
-                            ;;                                 (vector texture-coords-scale texture-coords-scale)
-                            ;;                                 material face-filter)
-
-                            ;; (let* ((edge-graph (model->edge-graph model))
-                            ;;        (node (vector-ref edge-graph 0))
-                            ;;        (face (edge-graph-node-face node))
-                            ;;        (edge (make-face-edge model
-                            ;;                              face
-                            ;;                              (vector-ref (face-corners face) 1)
-                            ;;                              (vector-ref (face-corners face) 2)
-                            ;;                              ))
-                            ;;        )
-                            ;;   (model-clear-texture-coordinates! model)
-                            ;;   (apply-texture-along-edge-graph model node edge
-                            ;;                                   (vector 0 0)
-                            ;;                                   (vector texture-coords-scale 0)
-                            ;;                                   material face-filter)
-                            ;;   )
-
                             (let* ((edge-graph (model->edge-graph model)))
                               (model-clear-texture-coordinates! model)
                               (apply-texture-across-edge-graph model edge-graph material face-filter texture-coords-scale)))
@@ -246,8 +240,14 @@
                    (loop (cdr input-files)))))
 
           (cond (print-info
-                 (let ((aa-box (model-aa-box model))
-                       (texture-aa-box (model-texture-aa-box model)))
+                 (let* ((aa-box (model-aa-box model))
+                        (texture-aa-box (model-texture-aa-box model))
+                        (center (aa-box-center aa-box))
+                        (dimensions (model-dimensions model))
+                        (reg (vector
+                              (+ (/ (- (vector3-x center)) (vector3-x dimensions)) 0.5)
+                              (+ (/ (- (vector3-y center)) (vector3-y dimensions)) 0.5)
+                              (+ (/ (- (vector3-z center)) (vector3-z dimensions)) 0.5))))
 
                    (display "aa-box: " (current-error-port))
                    (write `(,(aa-box-low-corner aa-box)
@@ -262,16 +262,21 @@
                        (write #f (current-error-port)))
                    (newline (current-error-port))
 
-                   (display "dimensions: " (current-error-port))
-                   (write `(,(model-dimensions model)) (current-error-port))
-                   (newline (current-error-port))
+                   (cout "dimensions: " dimensions "\n" (current-error-port))
+
+                   ;; values to use for registration-point if the model gets centered on origin
+                   (cout "registration: " reg "\n" (current-error-port))
 
                    (cout "materials: " (model-material-libraries model) "\n")
                    (cout "vertices: " (vector-length (coordinates-as-vector (model-vertices model))) "\n")
                    (cout "meshes: " (length (model-meshes model)) "\n")
-
-
-                   )))
+                   (let ((face-count 0))
+                     (operate-on-faces
+                      model
+                      (lambda (mesh other-face)
+                        (set! face-count (+ face-count 1))
+                        other-face))
+                     (cout "faces: " face-count "\n")))))
 
           (let ((size-printer
                  (lambda (dim-getter)

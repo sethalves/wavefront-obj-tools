@@ -161,6 +161,15 @@
         (write-scad-item (vector-ref v i) indent port))
       (cout "]" port))
 
+    (define (write-scad-vertex vertex indent port)
+      (let ((v (vertex-position vertex)))
+        (cout "[" port)
+        (write-scad-item (vector-ref v 0) indent port)
+        (do ((i 1 (+ i 1)))
+            ((= i (vector-length v)) #t)
+          (cout ", " port)
+          (write-scad-item (vector-ref v i) indent port))
+        (cout "]" port)))
 
     (define (write-scad-translate trans indent port)
       (cout (spaces indent) "translate(" port)
@@ -267,6 +276,7 @@
              )
             ((string? item) (cout item port))
             ((vector? item) (write-scad-vector item indent port))
+            ((vertex? item) (write-scad-vertex item indent port))
             ((list? item) (write-scad-item (list->vector item) indent port))
             ((scad-translate? item) (write-scad-translate item indent port))
             ((scad-rotate? item) (write-scad-rotate item indent port))
